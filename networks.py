@@ -15,6 +15,7 @@ class ResnetGenerator(nn.Module):
             normalization: batch or instance
             num_blocks: number of resnet blocks. 9 for 256x256, 6 for lower
         """
+        super(ResnetGenerator, self).__init__()
         model = []
         
         # Paper states to use instance norm, but we'll give the option of using batch
@@ -72,7 +73,7 @@ class ResnetGenerator(nn.Module):
         # C7s1-3 block
         model += [nn.ReflectionPad2d(3), 
                   nn.Conv2d(64, output_channels, kernel_size=7, bias=use_bias)]
-                  
+
         # Last block uses tanh instead of ReLU
         model += [nn.Tanh()]
 
@@ -108,4 +109,56 @@ class ResnetBlock(nn.Module):
     
     def forward(self, x):
         return x + self.conv_block(x)
+
+class Discriminator(nn.Module):
+    """discriminator class trained alongisde generator"""
+
+    def __init__(self, input_channels, ndf=64, n_layers=3, normalization='instance'):
+        """
+        Paramters:
+            input_channels: number of channels in input image
+            ndf: number of filters use in convolutions
+            n_layers: number of conv layers
+            normalization: batch or instance
+        """
+        super(Discriminator, self).__init__()
+        model = []
+        
+        # Paper states to use instance norm, but we'll give the option of using batch
+        if normalization == 'instance':
+            norm_layer = nn.InstanceNorm2d
+        elif normalization == 'batch':
+            norm_layer = nn.BatchNorm2d
+        else:
+            raise NotImplementedError('ResnetGenerator: Normaliztion [%s] is not implemented' % normalization)
+
+        use_bias = False
+        if normalization == 'instance':
+            use_bias = True
+        
+        # C64 block
+        model+=[nn.Conv2d(input_channels, ndf, kernel_size=4, stride=2, padding=1), 
+                nn.LeakyReLU(0.2, True)]
+
+        # C128, C256, C512 block
+        for i in range(1, n_layers):
+            mult_i = 2 ** (i-1)
+            mult_o = 2 ** i
+            model+=[nn.Conv2d(ndf * mult_i, ndf * mult_o, kernel_size=4, stride=2, padding=1, bias=use_bias),
+                    norm_layer(ndf * mult_o), 
+                    nn.LeakyReLU(0.2, True)]
+
+        mult_i = 2 ** (n_layers-1)
+        mult_o = 2 ** n_layers
+        model+=[nn.Conv2d(ndf * mult_i, ndf * mult_o, kernel_size=4, stride=1, padding=1, bias=use_bias),
+                norm_layer(ndf * mult_o), 
+                nn.LeakyReLU(0.2, True)]
+        
+        # Final convolution
+        model += [nn.Conv2d(ndf * mult_o, 1, kernel_size=4, stride=1, padding=1)]
+
+        self.model = nn.Sequential(*model)
+
+    def forward(self, x):
+        return self.model(x)
 
