@@ -73,3 +73,23 @@ def init_weights(net, init_type='normal', init_gain=0.02):
 
     print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
+
+class LambdaLR():
+    """Learning rate schedule lambda function
+    
+    Constant learning rate until decay_epoch, then linearly decay
+    to zero for rest of epochs
+
+    Assume function takes in 1-indexed epochs
+    """
+
+    def __init__(self, num_epochs, decay_epoch):
+        self.num_epochs = num_epochs
+        self.decay_epoch = decay_epoch
+    
+    def step(self, curr_epoch):
+        if curr_epoch < self.decay_epoch:
+            return 1.0
+        else:
+            # Subtract 1 to prevent 0 learning rate during last epoch
+            return 1.0 - (curr_epoch - 1 - self.decay_epoch)/(self.num_epochs - self.decay_epoch)
