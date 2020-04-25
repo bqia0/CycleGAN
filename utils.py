@@ -39,6 +39,8 @@ class ImagePool(object):
                     ret_images.append(image)
         return image
 
+# Taken from:
+# https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/8cda06f7c36b012769efac63adc1a68586b8fb85/models/networks.py#L67
 def init_weights(net, init_type='normal', init_gain=0.02):
     """Initialize network weights.
     Parameters:
@@ -74,7 +76,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
     print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
 
-class LambdaLR():
+class LambdaLR(object):
     """Learning rate schedule lambda function
     
     Constant learning rate until decay_epoch, then linearly decay

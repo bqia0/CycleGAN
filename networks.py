@@ -1,6 +1,9 @@
 
 import torch
 import torch.nn as nn
+f
+import utils
+import os
 
 
 class ResnetGenerator(nn.Module):
@@ -161,4 +164,73 @@ class Discriminator(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+class CycleGAN(object):
+    """CycleGAN Class
+    Contains both discriminators and generators
+    and all optimizers/schedulers
+    """
+    def __init__(self, num_epochs, decay_epoch, initial_lr):
+        # Generator Networks
+        self.G_AB = ResnetGenerator(input_channels=3, output_channels=3)
+        self.G_BA = ResnetGenerator(input_channels=3, output_channels=3)
+
+        # Discriminator Networks
+        self.D_A = Discriminator(input_channels=3)
+        self.D_B = Discriminator(input_channels=3)
+
+        # Device
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+        # Losses
+        self.MSE = nn.MSELoss()
+        self.L1 = nn.L1Loss()
+
+        # Training items
+        self.curr_epoch = 0
+
+        self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=initial_lr)
+        self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=initial_lr)
+
+        self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(num_epochs, decay_epoch).step)
+        self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(num_epochs, decay_epoch).step)
+
+    def save_checkpoint(self, curr_epoch, ckpt_dir):
+        state = {
+            'epoch': curr_epoch,
+            'G_AB': self.G_AB.state_dict(),
+            'G_BA': self.G_BA.state_dict(),
+            'D_A': self.D_A.state_dict(),
+            'D_B': self.D_B.state_dict(),
+            'G_Optimizer': self.gen_optimizer.state_dict(),
+            'D_Optimizer': self.dis_optimizer.state_dict(),
+            # 'G_Scheduler': self.gen_scheduler.state_dict(),
+            # 'D_Scheduler': self.dis_scheduler.state_dict()
+        }
+        torch.save(state, ckpt_dir)
+
+
+    def load_checkpoint(self, ckpt_dir):
+        if os.path.isfile(ckpt_dir):
+            print("=> loading checkpoint '{}'".format(ckpt_dir))
+            checkpoint = torch.load(ckpt_dir)
+            self.curr_epoch = checkpoint['epoch']
+            self.G_AB.load_state_dict(checkpoint['G_AB'])
+            self.G_BA.load_state_dict(checkpoint['G_BA'])
+            self.D_A.load_state_dict(checkpoint['D_A'])
+            self.D_B.load_state_dict(checkpoint['D_B'])
+            self.gen_optimizer.load_state_dict(checkpoint['G_Optimizer'])
+            self.dis_optimizer.load_state_dict(checkpoint['D_Optimizer'])
+            # self.gen_scheduler.load_state_dict(checkpoint['G_Scheduler'])
+            # self.dis_scheduler.load_state_dict(checkpoint['D_Scheduler'])
+
+            print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(ckpt_dir))
+
+
+
+
+
+
 
