@@ -1,9 +1,11 @@
 
 import torch
 import torch.nn as nn
-f
+import torchvision.datasets as datasets
+import torchvision.transforms as transforms
 import utils
 import os
+from PIL import Image
 
 
 class ResnetGenerator(nn.Module):
@@ -172,8 +174,8 @@ class CycleGAN(object):
     """
     def __init__(self, num_epochs, decay_epoch, initial_lr):
         # Generator Networks
-        self.G_AB = ResnetGenerator(input_channels=3, output_channels=3)
-        self.G_BA = ResnetGenerator(input_channels=3, output_channels=3)
+        self.G_AB = ResnetGenerator(input_channels=3, output_channels=3) # A-> B
+        self.G_BA = ResnetGenerator(input_channels=3, output_channels=3) # B-> A
 
         # Discriminator Networks
         self.D_A = Discriminator(input_channels=3)
@@ -194,6 +196,24 @@ class CycleGAN(object):
 
         self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(num_epochs, decay_epoch).step)
         self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(num_epochs, decay_epoch).step)
+
+        # Transforms
+        # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/2c5f2b14a577753b6ce40716e42dc28b21ed775a/data/base_dataset.py#L81
+        # and from default base options
+        # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/options/base_options.py
+        self.train_transforms = transforms.Compose([
+            transforms.Resize(286, Image.BICUBIC),
+            transforms.RandomCrop(256),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+        self.test_transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
 
     def save_checkpoint(self, curr_epoch, ckpt_dir):
         state = {
@@ -229,6 +249,118 @@ class CycleGAN(object):
             print("=> no checkpoint found at '{}'".format(ckpt_dir))
 
 
+    def get_dataloaders(self):
+        data_a = datasets.ImageFolder('./datasets/summer2winter_yosemite/trainA', transform=self.train_transforms)
+        data_b = datasets.ImageFolder('./datasets/summer2winter_yosemite/trainB', transform=self.train_transforms)
+        loader_a = torch.utils.data.DataLoader(data_a,
+                                          batch_size=1, 
+                                          shuffle=True, 
+                                          num_workers=1)
+        loader_b = torch.utils.data.DataLoader(data_b,
+                                          batch_size=1, 
+                                          shuffle=True, 
+                                          num_workers=1)
+        
+        return loader_a, loader_b
+
+    def train(self):
+        # Obtain dataloaders
+        loader_a, loader_b = self.get_dataloaders()
+
+        # Generated image pools
+        imagepool_a = utils.ImagePool()
+        imagepool_b = utils.ImagePool()
+
+        # TODO: use arguments for hyperparameters
+        lambda_coef = 10
+        lambda_idt = 0.5
+
+        step = 0
+
+        self.load_checkpoint('./ckpts/checkpoint.ckpt')
+
+        for epoch in range(self.curr_epoch, 200):
+
+            for a_real, b_real in zip(loader_a, loader_b):
+                # Send data to (ideally) GPU
+                a_real = a_real.to(self.device)
+                b_real = b_real.to(self.device)
+
+                # batch size
+                batch_size = a_real.shape[0]
+                positive_labels = torch.ones(batch_size).to(self.device)
+                negative_labels = torch.zeros(batch_size).to(self.device)
+                
+                # Generator forward passes
+                a_fake = self.G_BA(b_real)
+                b_fake = self.G_AB(a_real)
+
+                a_reconstruct = self.G_BA(b_fake)
+                b_reconstruct = self.G_AB(a_fake)
+
+                a_identity = self.G_BA(a_real)
+                b_identity = self.G_AB(b_real)
+
+                # Identity Loss
+                a_idt_loss = self.L1(a_identity, a_real) * lambda_coef * lambda_idt 
+                b_idt_loss = self.L1(b_identity, b_real) * lambda_coef * lambda_idt 
+
+                # GAN Loss
+                a_fake_dis = self.D_A(a_fake)
+                b_fake_dis = self.D_B(b_fake)
+
+                a_gan_loss = self.MSE(a_fake_dis, positive_labels)
+                b_gan_loss = self.MSE(b_fake_dis, positive_labels)
+
+                # Cycle Loss
+                a_cycle_loss = self.L1(a_reconstruct, a_real) * lambda_coef
+                b_cycle_loss = self.L1(b_reconstruct, b_real) * lambda_coef
+
+                # Total Loss
+                total_gan_loss = a_idt_loss + b_idt_loss + a_fake_dis + a_gan_loss + b_gan_loss + a_cycle_loss + b_cycle_loss
+
+                # Sample previously generated images for discriminator forward pass
+                a_fake = imagepool_a(a_fake) # a_fake first dim might be batch entry
+                b_fake = imagepool_b(b_fake)
+
+                # Discriminator forward pass
+                a_real_dis = self.D_A(a_real)
+                a_fake_dis = self.D_B(a_fake)
+                b_real_dis = self.D_B(b_real)
+                b_fake_dis = self.D_B(b_fake)
+
+                # Discriminator Losses
+                a_dis_real_loss = self.MSE(a_real_dis, positive_labels)
+                a_dis_fake_loss = self.MSE(a_fake_dis, negative_labels)
+                b_dis_real_loss = self.MSE(b_real_dis, positive_labels)
+                b_dis_fake_loss = self.MSE(b_fake_dis, negative_labels)
+
+                a_dis_loss = (a_dis_real_loss + a_dis_fake_loss) * 0.5
+                b_dis_loss = (b_dis_real_loss + b_dis_fake_loss) * 0.5
+
+                # Step
+                self.gen_optimizer.zero_grad()
+                total_gan_loss.backwards()
+                self.gen_optimizer.step()
+
+                self.dis_optimizer.zero_grad()
+                a_dis_loss.step()
+                b_dis_loss.step()
+                self.dis_optimizer.step()
+
+                self.gen_scheduler.step()
+                self.dis_scheduler.step()
+
+                print("Epoch: (%3d) (%5d/%5d) | Gen Loss:%.2e | Dis Loss:%.2e" % 
+                                                (epoch, step + 1, min(len(loader_a), len(loader_b)),
+                                                                total_gan_loss,a_dis_loss+b_dis_loss))
+
+                step += 1
+            self.save_checkpoint(epoch, './ckpts/checkpoint.ckpt')
+            step = 0
+
+
+        
 
 
 
