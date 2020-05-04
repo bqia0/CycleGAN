@@ -1,6 +1,7 @@
 
 import torch
 import torch.nn as nn
+import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import utils
@@ -11,7 +12,7 @@ from PIL import Image
 class ResnetGenerator(nn.Module):
     """ Generator class utilizing resnets"""
 
-    def __init__(self, input_channels, output_channels, ngf=64, normalization='instance', num_blocks=9):
+    def __init__(self, input_channels, output_channels, ngf=64, normalization='instance', use_dropout=True, num_blocks=9):
         """
         Paramters:
             input_channels: number of channels in input image
@@ -55,7 +56,7 @@ class ResnetGenerator(nn.Module):
         """Resnet Blocks"""
         for _ in range(num_blocks):
             # R256 blocks
-            model+=[ResnetBlock(256, norm_layer, use_bias)]
+            model+=[ResnetBlock(256, norm_layer, use_dropout, use_bias)]
         
         """Upsampling"""
         # U128 block
@@ -89,11 +90,11 @@ class ResnetGenerator(nn.Module):
 
 
 class ResnetBlock(nn.Module):
-    def __init__ (self, num_filters, norm_layer, use_bias):
+    def __init__ (self, num_filters, norm_layer, use_dropout, use_bias):
         super(ResnetBlock, self).__init__()
-        self.conv_block = self.build_conv_block(num_filters, norm_layer, use_bias)
+        self.conv_block = self.build_conv_block(num_filters, norm_layer, use_dropout, use_bias)
     
-    def build_conv_block(self, num_filters, norm_layer, use_bias):
+    def build_conv_block(self, num_filters, norm_layer, use_dropout, use_bias):
         """Image should come out the same size"""
         conv_block = []
         
@@ -104,6 +105,9 @@ class ResnetBlock(nn.Module):
         conv_block += [nn.Conv2d(num_filters, num_filters, kernel_size=3, bias=use_bias), 
                       norm_layer(num_filters), 
                       nn.ReLU(True)]
+
+        if use_dropout:
+            conv_block += [nn.Dropout(0.5)]
 
         conv_block += [nn.ReflectionPad2d(1)]
 
@@ -172,17 +176,21 @@ class CycleGAN(object):
     Contains both discriminators and generators
     and all optimizers/schedulers
     """
-    def __init__(self, num_epochs, decay_epoch, initial_lr):
-        # Generator Networks
-        self.G_AB = ResnetGenerator(input_channels=3, output_channels=3) # A-> B
-        self.G_BA = ResnetGenerator(input_channels=3, output_channels=3) # B-> A
-
-        # Discriminator Networks
-        self.D_A = Discriminator(input_channels=3)
-        self.D_B = Discriminator(input_channels=3)
-
+    def __init__(self, args):
         # Device
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+        # Generator Networks
+        self.G_AB = ResnetGenerator(input_channels=3, output_channels=3, ngf=args.ngf, 
+                                    normalization=args.norm, use_dropout=not args.no_dropout).to(self.device) # A-> B
+
+        self.G_BA = ResnetGenerator(input_channels=3, output_channels=3, ngf=args.ngf, 
+                                    normalization=args.norm, use_dropout=not args.no_dropout).to(self.device) # B-> A
+
+        # Discriminator Networks
+        self.D_A = Discriminator(input_channels=3, ndf=args.ndf, normalization=args.norm).to(self.device)
+        self.D_B = Discriminator(input_channels=3, ndf=args.ndf, normalization=args.norm).to(self.device)
+
 
         # Losses
         self.MSE = nn.MSELoss()
@@ -191,25 +199,26 @@ class CycleGAN(object):
         # Training items
         self.curr_epoch = 0
 
-        self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=initial_lr)
-        self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=initial_lr)
+        self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=args.lr)
+        self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=args.lr)
 
-        self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(num_epochs, decay_epoch).step)
-        self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(num_epochs, decay_epoch).step)
+        self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
+        self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
 
         # Transforms
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/2c5f2b14a577753b6ce40716e42dc28b21ed775a/data/base_dataset.py#L81
         # and from default base options
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/options/base_options.py
         self.train_transforms = transforms.Compose([
-            transforms.Resize(286, Image.BICUBIC),
-            transforms.RandomCrop(256),
+            transforms.Resize(args.load_size, Image.BICUBIC),
+            transforms.RandomCrop(args.crop_size),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
         self.test_transforms = transforms.Compose([
+            transforms.Resize(args.load_size, Image.BICUBIC),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
@@ -249,39 +258,76 @@ class CycleGAN(object):
             print("=> no checkpoint found at '{}'".format(ckpt_dir))
 
 
-    def get_dataloaders(self):
-        data_a = datasets.ImageFolder('./datasets/summer2winter_yosemite/trainA', transform=self.train_transforms)
-        data_b = datasets.ImageFolder('./datasets/summer2winter_yosemite/trainB', transform=self.train_transforms)
-        loader_a = torch.utils.data.DataLoader(data_a,
-                                          batch_size=1, 
-                                          shuffle=True, 
-                                          num_workers=1)
-        loader_b = torch.utils.data.DataLoader(data_b,
-                                          batch_size=1, 
-                                          shuffle=True, 
-                                          num_workers=1)
-        
-        return loader_a, loader_b
+    def get_dataloader(self, args):
 
-    def train(self):
+        if args.train:
+            mode = 'train'
+        else:
+            mode = 'test'
+
+        data = utils.CycleGANDataset(args.dataset_dir, transform=self.train_transforms, mode=mode)
+
+        loader = torch.utils.data.DataLoader(data,
+                                          batch_size=args.batch_size, 
+                                          shuffle=True, 
+                                          num_workers=0)
+        
+        return loader
+    
+    def test(self, args):
+        loader = self.get_dataloader(args)
+        self.load_checkpoint(args.checkpoint_dir)
+
+        self.G_BA.eval()
+        self.G_AB.eval()
+
+        i = 0
+        for a_real, b_real in loader:
+
+            if i == args.test_samples:
+                break
+
+            a_real = a_real.to(self.device)
+            b_real = b_real.to(self.device)
+
+            with torch.no_grad():
+                a_fake = self.G_BA(b_real)
+                b_fake = self.G_AB(a_real)
+                a_reconstruct = self.G_BA(b_fake)
+                b_reconstruct = self.G_AB(a_fake)
+            i+=1
+
+            output_image = torch.cat([a_real, b_fake, a_reconstruct, b_real, a_fake, b_reconstruct], dim=0).data
+            torchvision.utils.save_image(output_image, args.results_dir+'/test_{}.jpg'.format(i), nrow=3)
+
+
+    def train(self, args):
         # Obtain dataloaders
-        loader_a, loader_b = self.get_dataloaders()
+        loader = self.get_dataloader(args)
 
         # Generated image pools
         imagepool_a = utils.ImagePool()
         imagepool_b = utils.ImagePool()
 
-        # TODO: use arguments for hyperparameters
-        lambda_coef = 10
-        lambda_idt = 0.5
+        lambda_coef = args.lamda
+        lambda_idt = args.idt_coef
+
+        # Initialize Weights
+        utils.init_weights(self.G_BA)
+        utils.init_weights(self.G_AB)
+        utils.init_weights(self.D_A)
+        utils.init_weights(self.D_B)
+
+        self.G_BA.train()
+        self.G_AB.train()
 
         step = 0
 
-        self.load_checkpoint('./ckpts/checkpoint.ckpt')
+        self.load_checkpoint(args.checkpoint_dir)
 
-        for epoch in range(self.curr_epoch, 200):
+        for epoch in range(self.curr_epoch, args.epochs):
 
-            for a_real, b_real in zip(loader_a, loader_b):
+            for a_real, b_real in loader:
                 # Send data to (ideally) GPU
                 a_real = a_real.to(self.device)
                 b_real = b_real.to(self.device)
@@ -309,6 +355,8 @@ class CycleGAN(object):
                 a_fake_dis = self.D_A(a_fake)
                 b_fake_dis = self.D_B(b_fake)
 
+                positive_labels = torch.ones_like(a_fake_dis)
+
                 a_gan_loss = self.MSE(a_fake_dis, positive_labels)
                 b_gan_loss = self.MSE(b_fake_dis, positive_labels)
 
@@ -317,11 +365,14 @@ class CycleGAN(object):
                 b_cycle_loss = self.L1(b_reconstruct, b_real) * lambda_coef
 
                 # Total Loss
-                total_gan_loss = a_idt_loss + b_idt_loss + a_fake_dis + a_gan_loss + b_gan_loss + a_cycle_loss + b_cycle_loss
+                total_gan_loss = a_idt_loss + b_idt_loss + a_gan_loss + b_gan_loss + a_cycle_loss + b_cycle_loss
 
                 # Sample previously generated images for discriminator forward pass
-                a_fake = imagepool_a(a_fake) # a_fake first dim might be batch entry
-                b_fake = imagepool_b(b_fake)
+                a_fake = torch.Tensor(imagepool_a(a_fake.detach().cpu().clone().numpy())) # a_fake first dim might be batch entry
+                b_fake = torch.Tensor(imagepool_b(b_fake.detach().cpu().clone().numpy()))
+
+                a_fake = a_fake.to(self.device)
+                b_fake = b_fake.to(self.device)
 
                 # Discriminator forward pass
                 a_real_dis = self.D_A(a_real)
@@ -330,6 +381,9 @@ class CycleGAN(object):
                 b_fake_dis = self.D_B(b_fake)
 
                 # Discriminator Losses
+                positive_labels = torch.ones_like(a_fake_dis)
+                negative_labels = torch.zeros_like(a_fake_dis)
+
                 a_dis_real_loss = self.MSE(a_real_dis, positive_labels)
                 a_dis_fake_loss = self.MSE(a_fake_dis, negative_labels)
                 b_dis_real_loss = self.MSE(b_real_dis, positive_labels)
@@ -340,23 +394,35 @@ class CycleGAN(object):
 
                 # Step
                 self.gen_optimizer.zero_grad()
-                total_gan_loss.backwards()
+                total_gan_loss.backward()
                 self.gen_optimizer.step()
 
                 self.dis_optimizer.zero_grad()
-                a_dis_loss.step()
-                b_dis_loss.step()
+                a_dis_loss.backward()
+                b_dis_loss.backward()
                 self.dis_optimizer.step()
 
                 self.gen_scheduler.step()
                 self.dis_scheduler.step()
 
+                for group in self.dis_optimizer.param_groups:
+                    for p in group['params']:
+                        state = self.dis_optimizer.state[p]
+                        if state['step'] >= 962:
+                            state['step'] = 962
+
+                for group in self.gen_optimizer.param_groups:
+                    for p in group['params']:
+                        state = self.gen_optimizer.state[p]
+                        if state['step'] >= 962:
+                            state['step'] = 962
+    
                 print("Epoch: (%3d) (%5d/%5d) | Gen Loss:%.2e | Dis Loss:%.2e" % 
-                                                (epoch, step + 1, min(len(loader_a), len(loader_b)),
+                                                (epoch, step + 1, len(loader),
                                                                 total_gan_loss,a_dis_loss+b_dis_loss))
 
                 step += 1
-            self.save_checkpoint(epoch, './ckpts/checkpoint.ckpt')
+            self.save_checkpoint(epoch, args.checkpoint_dir)
             step = 0
 
 
