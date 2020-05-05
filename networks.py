@@ -202,8 +202,8 @@ class CycleGAN(object):
         self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=args.lr)
         self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=args.lr)
 
-        self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
-        self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
+        # self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
+        # self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
 
         # Transforms
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/2c5f2b14a577753b6ce40716e42dc28b21ed775a/data/base_dataset.py#L81
@@ -236,13 +236,18 @@ class CycleGAN(object):
             # 'G_Scheduler': self.gen_scheduler.state_dict(),
             # 'D_Scheduler': self.dis_scheduler.state_dict()
         }
-        torch.save(state, ckpt_dir)
+
+        if not os.path.exists(ckpt_dir):
+            os.makedirs(ckpt_dir)
+
+        torch.save(state, ckpt_dir+'checkpoint.ckpt')
 
 
     def load_checkpoint(self, ckpt_dir):
-        if os.path.isfile(ckpt_dir):
-            print("=> loading checkpoint '{}'".format(ckpt_dir))
-            checkpoint = torch.load(ckpt_dir)
+        file_dir = ckpt_dir+'checkpoint.ckpt'
+        if os.path.isfile(file_dir):
+            print("=> loading checkpoint '{}'".format(file_dir))
+            checkpoint = torch.load(file_dir)
             self.curr_epoch = checkpoint['epoch']
             self.G_AB.load_state_dict(checkpoint['G_AB'])
             self.G_BA.load_state_dict(checkpoint['G_BA'])
@@ -255,7 +260,7 @@ class CycleGAN(object):
 
             print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(ckpt_dir))
+            print("=> no checkpoint found at '{}'".format(file_dir))
 
 
     def get_dataloader(self, args):
@@ -265,12 +270,12 @@ class CycleGAN(object):
         else:
             mode = 'test'
 
-        data = utils.CycleGANDataset(args.dataset_dir, transform=self.train_transforms, mode=mode)
+        data = utils.CycleGANDataset('./datasets/'+args.dataset, transform=self.train_transforms, mode=mode)
 
         loader = torch.utils.data.DataLoader(data,
                                           batch_size=args.batch_size, 
                                           shuffle=True, 
-                                          num_workers=0)
+                                          num_workers=1)
         
         return loader
     
@@ -402,8 +407,8 @@ class CycleGAN(object):
                 b_dis_loss.backward()
                 self.dis_optimizer.step()
 
-                self.gen_scheduler.step()
-                self.dis_scheduler.step()
+                # self.gen_scheduler.step()
+                # self.dis_scheduler.step()
 
                 for group in self.dis_optimizer.param_groups:
                     for p in group['params']:
@@ -416,10 +421,11 @@ class CycleGAN(object):
                         state = self.gen_optimizer.state[p]
                         if state['step'] >= 962:
                             state['step'] = 962
-    
-                print("Epoch: (%3d) (%5d/%5d) | Gen Loss:%.2e | Dis Loss:%.2e" % 
-                                                (epoch, step + 1, len(loader),
-                                                                total_gan_loss,a_dis_loss+b_dis_loss))
+
+                if (step + 1) % 5 == 0:
+                    print("Epoch: (%3d) (%5d/%5d) | Gen Loss:%.2e | Dis Loss:%.2e" % 
+                                                    (epoch, step + 1, len(loader),
+                                                                    total_gan_loss,a_dis_loss+b_dis_loss))
 
                 step += 1
             self.save_checkpoint(epoch, args.checkpoint_dir)
