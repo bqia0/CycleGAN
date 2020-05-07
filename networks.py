@@ -199,11 +199,11 @@ class CycleGAN(object):
         # Training items
         self.curr_epoch = 0
 
-        self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=args.lr)
-        self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=args.lr)
+        self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=args.lr, betas=(0.5, 0.999))
+        self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=args.lr, betas=(0.5, 0.999))
 
-        # self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
-        # self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, utils.LambdaLR(args.epochs, args.decay_epoch).step)
+        self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, lr_lambda=utils.LambdaLR(args.epochs, args.decay_epoch).step)
+        self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, lr_lambda=utils.LambdaLR(args.epochs, args.decay_epoch).step)
 
         # Transforms
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/2c5f2b14a577753b6ce40716e42dc28b21ed775a/data/base_dataset.py#L81
@@ -218,7 +218,7 @@ class CycleGAN(object):
         ])
 
         self.test_transforms = transforms.Compose([
-            transforms.Resize(args.load_size, Image.BICUBIC),
+            transforms.Resize(args.crop_size, Image.BICUBIC),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
@@ -267,10 +267,12 @@ class CycleGAN(object):
 
         if args.train:
             mode = 'train'
+            transforms = self.train_transforms
         else:
             mode = 'test'
+            transforms = self.test_transforms
 
-        data = utils.CycleGANDataset('./datasets/'+args.dataset, transform=self.train_transforms, mode=mode)
+        data = utils.CycleGANDataset('./datasets/'+args.dataset, transform=transforms, mode=mode)
 
         loader = torch.utils.data.DataLoader(data,
                                           batch_size=args.batch_size, 
@@ -287,6 +289,10 @@ class CycleGAN(object):
         self.G_AB.eval()
 
         i = 0
+
+        if not os.path.exists(args.results_dir):
+            os.makedirs(args.results_dir)
+
         for a_real, b_real in loader:
 
             if i == args.test_samples:
@@ -323,12 +329,16 @@ class CycleGAN(object):
         utils.init_weights(self.D_A)
         utils.init_weights(self.D_B)
 
-        self.G_BA.train()
-        self.G_AB.train()
-
         step = 0
 
         self.load_checkpoint(args.checkpoint_dir)
+
+        # Terrible hack
+        self.gen_scheduler.last_epoch = self.curr_epoch - 1
+        self.dis_scheduler.last_epoch = self.curr_epoch - 1
+        
+        self.G_BA.train()
+        self.G_AB.train()
 
         for epoch in range(self.curr_epoch, args.epochs):
 
@@ -407,9 +417,6 @@ class CycleGAN(object):
                 b_dis_loss.backward()
                 self.dis_optimizer.step()
 
-                # self.gen_scheduler.step()
-                # self.dis_scheduler.step()
-
                 for group in self.dis_optimizer.param_groups:
                     for p in group['params']:
                         state = self.dis_optimizer.state[p]
@@ -429,6 +436,8 @@ class CycleGAN(object):
 
                 step += 1
             self.save_checkpoint(epoch, args.checkpoint_dir)
+            self.gen_scheduler.step()
+            self.dis_scheduler.step()
             step = 0
 
 

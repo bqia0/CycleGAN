@@ -13,7 +13,7 @@ def get_args():
     parser.add_argument('--idt_coef', type=float, default=0.5)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--test', action='store_true')
-    parser.add_argument('--test_samples', type=int, default=10)
+    parser.add_argument('--test_samples', type=int, default=20)
     parser.add_argument('--results_dir', type=str, default='./results')
     parser.add_argument('--dataset', type=str, default='summer2winter_yosemite')
     parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints/summer2winter_yosemite/')

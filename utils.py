@@ -91,13 +91,12 @@ class LambdaLR(object):
     def __init__(self, num_epochs, decay_epoch):
         self.num_epochs = num_epochs
         self.decay_epoch = decay_epoch
+        print("LambdaLR: %d epochs | %d decay epoch" % (num_epochs, decay_epoch))
     
-    def step(self, curr_epoch):
-        if curr_epoch < self.decay_epoch:
-            return 1.0
-        else:
-            # Subtract 1 to prevent 0 learning rate during last epoch
-            return 1.0 - (curr_epoch - 1 - self.decay_epoch)/(self.num_epochs - self.decay_epoch)
+    def step(self, epoch):
+        ret = 1.0 - max(0, epoch - self.decay_epoch)/(self.num_epochs - self.decay_epoch)
+        # print("Learning rate factor: {}".format(ret))
+        return ret
 
 class CycleGANDataset(Dataset):
     def __init__(self, root, transform=None, mode='train'):
