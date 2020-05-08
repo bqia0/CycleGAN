@@ -12,7 +12,7 @@ from PIL import Image
 class ResnetGenerator(nn.Module):
     """ Generator class utilizing resnets"""
 
-    def __init__(self, input_channels, output_channels, ngf=64, normalization='instance', use_dropout=True, num_blocks=9):
+    def __init__(self, input_channels, output_channels, ngf=64, normalization='instance', use_dropout=False, num_blocks=9):
         """
         Paramters:
             input_channels: number of channels in input image
@@ -188,22 +188,23 @@ class CycleGAN(object):
                                     normalization=args.norm, use_dropout=not args.no_dropout).to(self.device) # B-> A
 
         # Discriminator Networks
-        self.D_A = Discriminator(input_channels=3, ndf=args.ndf, normalization=args.norm).to(self.device)
-        self.D_B = Discriminator(input_channels=3, ndf=args.ndf, normalization=args.norm).to(self.device)
+        if args.train:
+            self.D_A = Discriminator(input_channels=3, ndf=args.ndf, normalization=args.norm).to(self.device)
+            self.D_B = Discriminator(input_channels=3, ndf=args.ndf, normalization=args.norm).to(self.device)
 
 
-        # Losses
-        self.MSE = nn.MSELoss()
-        self.L1 = nn.L1Loss()
+            # Losses
+            self.MSE = nn.MSELoss()
+            self.L1 = nn.L1Loss()
 
-        # Training items
-        self.curr_epoch = 0
+            # Training items
+            self.curr_epoch = 0
 
-        self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=args.lr, betas=(0.5, 0.999))
-        self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=args.lr, betas=(0.5, 0.999))
+            self.gen_optimizer = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=args.lr, betas=(0.5, 0.999))
+            self.dis_optimizer = torch.optim.Adam(list(self.D_A.parameters()) + list(self.D_B.parameters()), lr=args.lr, betas=(0.5, 0.999))
 
-        self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, lr_lambda=utils.LambdaLR(args.epochs, args.decay_epoch).step)
-        self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, lr_lambda=utils.LambdaLR(args.epochs, args.decay_epoch).step)
+            self.gen_scheduler = torch.optim.lr_scheduler.LambdaLR(self.gen_optimizer, lr_lambda=utils.LambdaLR(args.epochs, args.decay_epoch).step)
+            self.dis_scheduler = torch.optim.lr_scheduler.LambdaLR(self.dis_optimizer, lr_lambda=utils.LambdaLR(args.epochs, args.decay_epoch).step)
 
         # Transforms
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/2c5f2b14a577753b6ce40716e42dc28b21ed775a/data/base_dataset.py#L81
@@ -224,7 +225,7 @@ class CycleGAN(object):
         ])
 
 
-    def save_checkpoint(self, curr_epoch, ckpt_dir):
+    def save_checkpoint(self, curr_epoch, args):
         state = {
             'epoch': curr_epoch,
             'G_AB': self.G_AB.state_dict(),
@@ -236,25 +237,26 @@ class CycleGAN(object):
             # 'G_Scheduler': self.gen_scheduler.state_dict(),
             # 'D_Scheduler': self.dis_scheduler.state_dict()
         }
+        file_dir = os.path.join(args.checkpoint_dir, args.dataset).replace("\\","/")
+        if not os.path.exists(file_dir):
+            os.makedirs(file_dir)
+        torch.save(state, os.path.join(file_dir, 'checkpoint.ckpt').replace("\\","/"))
 
-        if not os.path.exists(ckpt_dir):
-            os.makedirs(ckpt_dir)
 
-        torch.save(state, ckpt_dir+'checkpoint.ckpt')
-
-
-    def load_checkpoint(self, ckpt_dir):
-        file_dir = ckpt_dir+'checkpoint.ckpt'
+    def load_checkpoint(self,args):
+        file_dir = os.path.join(args.checkpoint_dir, args.dataset, 'checkpoint.ckpt').replace("\\","/")
         if os.path.isfile(file_dir):
             print("=> loading checkpoint '{}'".format(file_dir))
             checkpoint = torch.load(file_dir)
-            self.curr_epoch = checkpoint['epoch']
             self.G_AB.load_state_dict(checkpoint['G_AB'])
             self.G_BA.load_state_dict(checkpoint['G_BA'])
-            self.D_A.load_state_dict(checkpoint['D_A'])
-            self.D_B.load_state_dict(checkpoint['D_B'])
-            self.gen_optimizer.load_state_dict(checkpoint['G_Optimizer'])
-            self.dis_optimizer.load_state_dict(checkpoint['D_Optimizer'])
+
+            if args.train:
+                self.curr_epoch = checkpoint['epoch']
+                self.D_A.load_state_dict(checkpoint['D_A'])
+                self.D_B.load_state_dict(checkpoint['D_B'])
+                self.gen_optimizer.load_state_dict(checkpoint['G_Optimizer'])
+                self.dis_optimizer.load_state_dict(checkpoint['D_Optimizer'])
             # self.gen_scheduler.load_state_dict(checkpoint['G_Scheduler'])
             # self.dis_scheduler.load_state_dict(checkpoint['D_Scheduler'])
 
@@ -283,7 +285,7 @@ class CycleGAN(object):
     
     def test(self, args):
         loader = self.get_dataloader(args)
-        self.load_checkpoint(args.checkpoint_dir)
+        self.load_checkpoint(args)
 
         self.G_BA.eval()
         self.G_AB.eval()
@@ -308,8 +310,8 @@ class CycleGAN(object):
                 b_reconstruct = self.G_AB(a_fake)
             i+=1
 
-            output_image = torch.cat([a_real, b_fake, a_reconstruct, b_real, a_fake, b_reconstruct], dim=0).data
-            torchvision.utils.save_image(output_image, args.results_dir+'/test_{}.jpg'.format(i), nrow=3)
+            output_image = (torch.cat([a_real, b_fake, a_reconstruct, b_real, a_fake, b_reconstruct], dim=0).data + 1)/ 2.0 # why add 1 then devide?
+            torchvision.utils.save_image(output_image, os.path.join(args.results_dir, args.dataset, 'test_{}.jpg'.format(i)).replace("\\","/"), nrow=3)
 
 
     def train(self, args):
@@ -331,7 +333,7 @@ class CycleGAN(object):
 
         step = 0
 
-        self.load_checkpoint(args.checkpoint_dir)
+        self.load_checkpoint(args)
 
         # Terrible hack
         self.gen_scheduler.last_epoch = self.curr_epoch - 1
@@ -435,7 +437,7 @@ class CycleGAN(object):
                                                                     total_gan_loss,a_dis_loss+b_dis_loss))
 
                 step += 1
-            self.save_checkpoint(epoch, args.checkpoint_dir)
+            self.save_checkpoint(epoch+1, args)
             self.gen_scheduler.step()
             self.dis_scheduler.step()
             step = 0

@@ -111,8 +111,11 @@ class CycleGANDataset(Dataset):
         self.transform = transform
         self.mode = mode
 
-        self.A_dir = root+ '/%s/%sA' % (mode, mode)
-        self.B_dir = root+ '/%s/%sB' % (mode, mode)
+        # self.A_dir = root+ '/%s/%sA' % (mode, mode)
+        # self.B_dir = root+ '/%s/%sB' % (mode, mode)
+
+        self.A_dir = os.path.join(self.root, '%sA' % (mode)).replace("\\","/")
+        self.B_dir = os.path.join(self.root, '%sB' % (mode)).replace("\\","/")
 
         self.files_A = os.listdir(self.A_dir)
         self.files_B = os.listdir(self.B_dir)
