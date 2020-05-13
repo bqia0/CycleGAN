@@ -292,8 +292,9 @@ class CycleGAN(object):
 
         i = 0
 
-        if not os.path.exists(args.results_dir):
-            os.makedirs(args.results_dir)
+        results_dir = os.path.join(args.results_dir, args.dataset).replace("\\","/")
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
 
         for a_real, b_real in loader:
 
@@ -311,7 +312,7 @@ class CycleGAN(object):
             i+=1
 
             output_image = (torch.cat([a_real, b_fake, a_reconstruct, b_real, a_fake, b_reconstruct], dim=0).data + 1)/ 2.0 # why add 1 then devide?
-            torchvision.utils.save_image(output_image, os.path.join(args.results_dir, args.dataset, 'test_{}.jpg'.format(i)).replace("\\","/"), nrow=3)
+            torchvision.utils.save_image(output_image, os.path.join(results_dir, 'test_{}.jpg'.format(i)).replace("\\","/"), nrow=3)
 
 
     def train(self, args):

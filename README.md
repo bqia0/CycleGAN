@@ -7,7 +7,7 @@ IE498 Final Project
 
 
 ### Datasets
-You can download a dataset with `datasets/download_dataset.sh` (from the [official CycleGAN repository](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix))
+You can download a dataset with `download_dataset.sh` (from the [official CycleGAN repository](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix))
 ```
 bash ./download_dataset.sh [name of dataset]
 ```
