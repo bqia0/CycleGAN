@@ -1,7 +1,9 @@
 # CycleGAN
-IE498 Final Project
+University of Illinois IE498 Final Project
 
 [CycleGAN](https://junyanz.github.io/CycleGAN/) implementation using PyTorch
+
+Image-to-Image Style Transfer without image pairs.
 
 ## Usage
 
@@ -22,3 +24,16 @@ You can generate a few test examples using the below command.
 ```
 python ./main.py --test --dataset [name of dataset] --test_samples [number of test samples]
 ```
+
+## Results
+
+We achieved good results on the summer2winter, apple2orange, and monet2photo datasets.
+
+### summer2winter
+![](media/summer2winter.jpg)
+
+### apple2orange
+![](media/apple2orange.jpg)
+
+### monet2photo
+![](media/monet2photo.jpg)
