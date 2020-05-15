@@ -3,7 +3,7 @@ University of Illinois IE498 Final Project
 
 [CycleGAN](https://junyanz.github.io/CycleGAN/) implementation using PyTorch
 
-Image-to-Image Style Transfer without image pairs.
+Image-to-Image Style Transfer without image pairs
 
 ## Usage
 
@@ -29,6 +29,8 @@ python ./main.py --test --dataset [name of dataset] --test_samples [number of te
 
 We achieved good results on the summer2winter, apple2orange, and monet2photo datasets.
 
+
+The third image in each row represents attempted reconstruction of the second image back to the first image's domain.
 ### summer2winter
 ![](media/summer2winter.jpg)
 
