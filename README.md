@@ -1,5 +1,5 @@
 # CycleGAN
-University of Illinois IE498 Final Project
+University of Illinois IE498 Final Project ([Brandon Qiao](https://github.com/bqia0), [Henry Woo](https://github.com/HenryCWoo))
 
 [CycleGAN](https://junyanz.github.io/CycleGAN/) implementation using PyTorch
 
